@@ -1,0 +1,295 @@
+{
+  "name": "SaaS PWA Onboarding Orchestration (Mercado Pago -> Cloudflare -> Welcome PWA)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "mercadopago-onboarding",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "name": "Mercado Pago Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        100,
+        300
+      ],
+      "id": "webhook-node-001"
+    },
+    {
+      "parameters": {
+        "functionCode": "// Extrai os dados do evento do Mercado Pago\nconst body = items[0].json.body || items[0].json;\nconst action = body.action || body.type;\nconst dataId = body.data ? body.data.id : body.id;\n\n// Extrai metadados do cliente enviado no checkout (custom_id ou metadata)\nconst metadata = body.metadata || {};\nconst restaurantId = metadata.restaurant_id || 'rest-uuid-default';\nconst ownerEmail = metadata.owner_email || 'cliente@pizzaria.com.br';\nconst ownerPhone = metadata.owner_phone || '5511999999999';\nconst desiredSubdomain = metadata.subdomain || 'pizzariadoze';\nconst plan = metadata.plan || 'standard';\n\nreturn [{\n  json: {\n    event_action: action,\n    payment_id: dataId,\n    restaurant_id: restaurantId,\n    owner_email: ownerEmail,\n    owner_phone: ownerPhone,\n    subdomain: desiredSubdomain,\n    plan: plan,\n    received_at: new Date().toISOString()\n  }\n}];"
+      },
+      "name": "Parse Payload & Metadata",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        320,
+        300
+      ],
+      "id": "parse-node-002"
+    },
+    {
+      "parameters": {
+        "requestMethod": "GET",
+        "url": "=https://api.mercadopago.com/v1/payments/{{$node[\"Parse Payload & Metadata\"].json[\"payment_id\"]}}",
+        "allowUnauthorizedCerts": false,
+        "responseFormat": "json",
+        "options": {
+          "headerParametersUi": {
+            "parameter": [
+              {
+                "name": "Authorization",
+                "value": "Bearer {{ $env.MERCADOPAGO_SAAS_ACCESS_TOKEN }}"
+              }
+            ]
+          }
+        }
+      },
+      "name": "Fetch MP Payment Details",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [
+        540,
+        300
+      ],
+      "id": "mp-fetch-node-003"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{$node[\"Fetch MP Payment Details\"].json[\"status\"]}}",
+              "value2": "approved"
+            }
+          ]
+        }
+      },
+      "name": "Check Payment Approved?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        760,
+        300
+      ],
+      "id": "if-approved-node-004"
+    },
+    {
+      "parameters": {
+        "requestMethod": "POST",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/restaurants",
+        "responseFormat": "json",
+        "jsonParameters": true,
+        "options": {
+          "headerParametersUi": {
+            "parameter": [
+              {
+                "name": "apikey",
+                "value": "={{ $env.SUPABASE_SERVICE_ROLE_KEY }}"
+              },
+              {
+                "name": "Authorization",
+                "value": "=Bearer {{ $env.SUPABASE_SERVICE_ROLE_KEY }}"
+              },
+              {
+                "name": "Prefer",
+                "value": "resolution=merge-duplicates"
+              }
+            ]
+          }
+        },
+        "bodyParametersJson": "={\n  \"id\": \"{{$node[\"Parse Payload & Metadata\"].json[\"restaurant_id\"]}}\",\n  \"plan_type\": \"{{$node[\"Parse Payload & Metadata\"].json[\"plan\"]}}\",\n  \"subscription_status\": \"active\"\n}"
+      },
+      "name": "Update Tenant Subscription (Supabase)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [
+        980,
+        200
+      ],
+      "id": "supabase-tenant-node-005"
+    },
+    {
+      "parameters": {
+        "requestMethod": "POST",
+        "url": "={{ $env.SUPABASE_URL }}/functions/v1/provision-subdomain",
+        "responseFormat": "json",
+        "jsonParameters": true,
+        "options": {
+          "headerParametersUi": {
+            "parameter": [
+              {
+                "name": "Authorization",
+                "value": "=Bearer {{ $env.SUPABASE_SERVICE_ROLE_KEY }}"
+              },
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          }
+        },
+        "bodyParametersJson": "={\n  \"restaurant_id\": \"{{$node[\"Parse Payload & Metadata\"].json[\"restaurant_id\"]}}\",\n  \"subdomain\": \"{{$node[\"Parse Payload & Metadata\"].json[\"subdomain\"]}}\"\n}"
+      },
+      "name": "Provision Cloudflare CNAME",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [
+        1200,
+        200
+      ],
+      "id": "cloudflare-edge-node-006"
+    },
+    {
+      "parameters": {
+        "requestMethod": "POST",
+        "url": "={{ $env.EVOLUTION_API_URL }}/message/sendText/{{ $env.EVOLUTION_API_INSTANCE }}",
+        "responseFormat": "json",
+        "jsonParameters": true,
+        "options": {
+          "headerParametersUi": {
+            "parameter": [
+              {
+                "name": "apikey",
+                "value": "={{ $env.EVOLUTION_API_KEY }}"
+              }
+            ]
+          }
+        },
+        "bodyParametersJson": "={\n  \"number\": \"{{$node[\"Parse Payload & Metadata\"].json[\"owner_phone\"]}}\",\n  \"options\": {\n    \"delay\": 1200\n  },\n  \"textMessage\": {\n    \"text\": \"🍕 *Parabéns! Sua PWA de Pizzaria está no ar!*\\n\\nSeu pagamento da assinatura foi confirmado!\\n\\n🌐 *Seu Link de Acesso PWA:*\\nhttps://{{$node[\"Provision Cloudflare CNAME\"].json[\"dns_record\"][\"name\"]}}.meusaaspizza.com.br\\n\\n🔑 *Painel Administrativo:*\\nhttps://{{$node[\"Provision Cloudflare CNAME\"].json[\"dns_record\"][\"name\"]}}.meusaaspizza.com.br/admin\\n\\nQualquer dúvida, nossa equipe está à disposição!\"\n  }\n}"
+      },
+      "name": "Send WhatsApp Welcome Message",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [
+        1420,
+        200
+      ],
+      "id": "whatsapp-node-007"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"status\": \"success\",\n  \"message\": \"Onboarding finalizado com sucesso! Subdomínio provisionado e PWA ativado.\",\n  \"domain\": \"{{$node[\"Provision Cloudflare CNAME\"].json[\"dns_record\"][\"name\"]}}.meusaaspizza.com.br\"\n}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "name": "Respond 200 OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        1640,
+        200
+      ],
+      "id": "respond-ok-node-008"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"status\": \"ignored\",\n  \"message\": \"Pagamento ainda não aprovado.\"\n}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "name": "Respond Ignored",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        980,
+        420
+      ],
+      "id": "respond-ignored-node-009"
+    }
+  ],
+  "connections": {
+    "Mercado Pago Webhook": {
+      "main": [
+        [
+          {
+            "node": "Parse Payload & Metadata",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Payload & Metadata": {
+      "main": [
+        [
+          {
+            "node": "Fetch MP Payment Details",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch MP Payment Details": {
+      "main": [
+        [
+          {
+            "node": "Check Payment Approved?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Payment Approved?": {
+      "main": [
+        [
+          {
+            "node": "Update Tenant Subscription (Supabase)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond Ignored",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Tenant Subscription (Supabase)": {
+      "main": [
+        [
+          {
+            "node": "Provision Cloudflare CNAME",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Provision Cloudflare CNAME": {
+      "main": [
+        [
+          {
+            "node": "Send WhatsApp Welcome Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send WhatsApp Welcome Message": {
+      "main": [
+        [
+          {
+            "node": "Respond 200 OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {}
+}
