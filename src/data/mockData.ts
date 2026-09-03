@@ -263,4 +263,6 @@ export const mockStoreSettings: StoreSettings = {
   minOrderValue: 20.00,
   storeAddress: 'Rua Haddock Lobo, 890 - Cerqueira César, São Paulo - SP',
   storePhone: '(11) 3255-0000',
+  acceptsPix: true,
+  acceptsCard: true,
 };

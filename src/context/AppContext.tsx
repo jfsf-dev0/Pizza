@@ -9,6 +9,8 @@ import {
   Order, 
   DeliveryAddress, 
   CustomerInfo, 
+  UserSession,
+  AdminSession,
   StoreSettings 
 } from '../types';
 import { 
@@ -29,11 +31,28 @@ export type ScreenView =
   | 'pix' 
   | 'tracking' 
   | 'kds' 
-  | 'admin';
+  | 'admin'
+  | 'admin_gestao';
+
+export type AppPortal = 'customer' | 'admin';
 
 interface AppContextType {
+  activePortal: AppPortal;
+  setActivePortal: (portal: AppPortal) => void;
+
   currentScreen: ScreenView;
   setCurrentScreen: (screen: ScreenView) => void;
+
+  // Auth Sessions
+  userSession: UserSession;
+  loginCustomer: (info: CustomerInfo) => void;
+  logoutCustomer: () => void;
+  isAuthModalOpen: boolean;
+  setIsAuthModalOpen: (open: boolean) => void;
+
+  adminSession: AdminSession;
+  loginAdmin: (role?: 'admin' | 'attendant' | 'deliveryman') => void;
+  logoutAdmin: () => void;
 
   // Catalog Data
   categories: Category[];
@@ -86,8 +105,19 @@ interface AppContextType {
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const [activePortal, setActivePortal] = useState<AppPortal>('customer');
   const [currentScreen, setCurrentScreen] = useState<ScreenView>('cardapio');
-  
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+
+  // Auth Sessions
+  const [userSession, setUserSession] = useState<UserSession>({
+    isAuthenticated: false,
+  });
+
+  const [adminSession, setAdminSession] = useState<AdminSession>({
+    isAuthenticated: false,
+  });
+
   // Data
   const [categories] = useState<Category[]>(mockCategories);
   const [pizzaSizes] = useState<PizzaSize[]>(mockPizzaSizes);
@@ -128,7 +158,37 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [activeOrder, setActiveOrder] = useState<Order | null>(mockOrders[0]);
 
   // Store Settings
-  const [storeSettings, setStoreSettings] = useState<StoreSettings>(mockStoreSettings);
+  const [storeSettings, setStoreSettings] = useState<StoreSettings>({
+    ...mockStoreSettings,
+    acceptsPix: true,
+    acceptsCard: true,
+  });
+
+  // Auth Handlers
+  const loginCustomer = (info: CustomerInfo) => {
+    setUserSession({
+      isAuthenticated: true,
+      customer: info,
+      provider: info.provider || 'guest',
+    });
+    setCustomer(info);
+  };
+
+  const logoutCustomer = () => {
+    setUserSession({ isAuthenticated: false });
+  };
+
+  const loginAdmin = (role: 'admin' | 'attendant' | 'deliveryman' = 'admin') => {
+    setAdminSession({
+      isAuthenticated: true,
+      username: 'Gerente Pizzaria',
+      role,
+    });
+  };
+
+  const logoutAdmin = () => {
+    setAdminSession({ isAuthenticated: false });
+  };
 
   // Financial Calculations
   const subtotal = cart.reduce((acc, item) => acc + item.subtotal, 0);
@@ -219,8 +279,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   return (
     <AppContext.Provider
       value={{
+        activePortal,
+        setActivePortal,
         currentScreen,
         setCurrentScreen,
+        userSession,
+        loginCustomer,
+        logoutCustomer,
+        isAuthModalOpen,
+        setIsAuthModalOpen,
+        adminSession,
+        loginAdmin,
+        logoutAdmin,
         categories,
         pizzaSizes,
         pizzaCrusts,

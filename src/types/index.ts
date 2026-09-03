@@ -85,7 +85,22 @@ export interface DeliveryAddress {
 export interface CustomerInfo {
   name: string;
   phone: string;
+  email?: string;
   cpf?: string;
+  avatarUrl?: string;
+  provider?: 'google' | 'facebook' | 'guest';
+}
+
+export interface UserSession {
+  isAuthenticated: boolean;
+  customer?: CustomerInfo;
+  provider?: 'google' | 'facebook' | 'guest';
+}
+
+export interface AdminSession {
+  isAuthenticated: boolean;
+  username?: string;
+  role?: UserRole;
 }
 
 export interface Order {
@@ -120,4 +135,6 @@ export interface StoreSettings {
   minOrderValue: number;
   storeAddress: string;
   storePhone: string;
+  acceptsPix: boolean;
+  acceptsCard: boolean;
 }
